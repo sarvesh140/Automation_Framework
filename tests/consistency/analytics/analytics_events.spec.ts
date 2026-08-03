@@ -1,4 +1,4 @@
-import { test, expect } from '../../../helpers/cross-fixtures';
+import { test, expect } from '../../../helpers/api-fixtures';
 
 test.describe('Analytics Events Consistency', { tag: ['@consistency', '@regression'] }, () => {
   let eventsResponse: any;
@@ -6,8 +6,11 @@ test.describe('Analytics Events Consistency', { tag: ['@consistency', '@regressi
   let portfolioResponse: any;
 
   test.beforeAll(async ({ dashboardApi }) => {
-    // /api/new-analytics/events genuinely takes ~80s on the live backend (verified against
-    // the real dashboardApi fixture) — well past the default 30s hook timeout.
+    // The three fetches below are fast on their own (a few seconds combined, verified
+    // live) — the real cost in this file was events_every_row_has_required_fields
+    // looping expect() per field per row over 10k+ events (~99s from matcher overhead
+    // alone, fixed to a single aggregate assertion). This timeout is generous headroom
+    // for a slower day on the live backend, not a reflection of the typical cost.
     test.setTimeout(120000);
     eventsResponse = await dashboardApi.getAnalyticsEvents();
     summaryResponse = await dashboardApi.getAnalyticsSummary();
@@ -27,16 +30,22 @@ test.describe('Analytics Events Consistency', { tag: ['@consistency', '@regressi
     });
 
     test('events_every_row_has_required_fields', () => {
-      for (const event of eventsResponse.data.events) {
-        expect(typeof event._id).toBe('string');
-        expect(typeof event.type).toBe('string');
-        expect(typeof event.experienceId).toBe('string');
+      // One expect() per field per row (10k+ events live) took ~99s from Playwright's
+      // per-assertion overhead alone, not the actual checks. Collapse to a single
+      // assertion over the whole array — still checks every row, just without paying
+      // matcher overhead 10,000+ times. Same pattern the sibling tests below already use.
+      const isValid = (event: any) =>
+        typeof event._id === 'string' &&
+        typeof event.type === 'string' &&
+        typeof event.experienceId === 'string' &&
         // experienceName is null for events whose experience has since been deleted/renamed.
-        expect(['string', 'object']).toContain(typeof event.experienceName);
-        expect(typeof event.timestamp).toBe('string');
-        expect(Number.isNaN(new Date(event.timestamp).getTime())).toBe(false);
-        expect(typeof event.properties).toBe('object');
-      }
+        ['string', 'object'].includes(typeof event.experienceName) &&
+        typeof event.timestamp === 'string' &&
+        !Number.isNaN(new Date(event.timestamp).getTime()) &&
+        typeof event.properties === 'object';
+
+      const invalid = eventsResponse.data.events.filter((event: any) => !isValid(event));
+      expect(invalid).toEqual([]);
     });
 
     test('events_summary_schema_is_valid', () => {
