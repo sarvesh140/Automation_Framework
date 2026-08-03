@@ -27,8 +27,18 @@ export class UsagePage extends BasePage {
   readonly percentColumnHeader: Locator;
   readonly creditsColumnHeader: Locator;
 
+  // Storage tab
+  readonly storageConsumptionHeading: Locator;
+
+  // Views tab — its breakdown section is labelled "Usage Breakdown", not "Breakdown"
+  readonly viewsUsageHeading: Locator;
+  readonly usageBreakdownHeading: Locator;
+
   // Usage trend
   readonly usageTrendHeading: Locator;
+
+  // Data rows of the currently-active breakdown table
+  readonly breakdownRows: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -54,6 +64,20 @@ export class UsagePage extends BasePage {
     this.percentColumnHeader = page.getByRole('columnheader', { name: '% of total' });
     this.creditsColumnHeader = page.getByRole('columnheader', { name: 'Credits' });
     this.usageTrendHeading = page.getByRole('heading', { name: 'Usage trend' });
+    this.storageConsumptionHeading = page.getByRole('heading', { name: 'Storage Consumption' });
+    this.viewsUsageHeading = page.getByRole('heading', { name: 'Views Usage' });
+    this.usageBreakdownHeading = page.getByRole('heading', { name: 'Usage Breakdown' });
+    this.breakdownRows = page.locator('table tbody tr');
+  }
+
+  /** Breakdown filter button for a given dimension, e.g. "By product", "By type", "By source". */
+  breakdownFilterBtn(label: string): Locator {
+    return this.page.getByRole('button', { name: label });
+  }
+
+  /** Column header cell of the currently-active breakdown table, e.g. "Product", "Experience". */
+  columnHeader(name: string): Locator {
+    return this.page.getByRole('columnheader', { name });
   }
 
   async open() {

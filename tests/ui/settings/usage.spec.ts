@@ -33,6 +33,40 @@ test.describe('Settings — Usage UI Exhaustive', { tag: ['@ui', '@regression'] 
       await usagePage.open();
       await expect(usagePage.viewsTab).toBeVisible();
     });
+
+    test('Clicking Storage tab switches to the Storage Consumption view', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      await usagePage.storageTab.click();
+
+      await expect(usagePage.storageConsumptionHeading).toBeVisible();
+      await expect(usagePage.creditsConsumptionHeading).not.toBeVisible();
+    });
+
+    test('Clicking Views tab switches to the Views Usage view', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      await usagePage.viewsTab.click();
+
+      await expect(usagePage.viewsUsageHeading).toBeVisible();
+      await expect(usagePage.usageBreakdownHeading).toBeVisible();
+      await expect(usagePage.creditsConsumptionHeading).not.toBeVisible();
+    });
+
+    test('Clicking Credits tab returns to the Credits Consumption view', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      await usagePage.viewsTab.click();
+      await expect(usagePage.viewsUsageHeading).toBeVisible();
+
+      await usagePage.creditsTab.click();
+
+      await expect(usagePage.creditsConsumptionHeading).toBeVisible();
+      await expect(usagePage.viewsUsageHeading).not.toBeVisible();
+    });
   });
 
   test.describe('Credits Consumption Card', () => {
@@ -114,6 +148,38 @@ test.describe('Settings — Usage UI Exhaustive', { tag: ['@ui', '@regression'] 
       const usagePage = new UsagePage(page);
       await usagePage.open();
       await expect(usagePage.creditsColumnHeader).toBeVisible();
+    });
+
+    test('Clicking By product switches the breakdown table to a Product column', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      await usagePage.byProductBtn.click();
+
+      await expect(usagePage.columnHeader('Product')).toBeVisible();
+      await expect(usagePage.userColumnHeader).not.toBeVisible();
+    });
+
+    test('Clicking By experience switches the breakdown table to an Experience column', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      await usagePage.byExperienceBtn.click();
+
+      await expect(usagePage.columnHeader('Experience')).toBeVisible();
+      await expect(usagePage.userColumnHeader).not.toBeVisible();
+    });
+
+    test('Export CSV button downloads a CSV file', async ({ page }) => {
+      const usagePage = new UsagePage(page);
+      await usagePage.open();
+
+      const [download] = await Promise.all([
+        page.waitForEvent('download'),
+        usagePage.exportCsvBtn.click(),
+      ]);
+
+      expect(download.suggestedFilename()).toMatch(/^credit-usage-current_month-\d{4}-\d{2}-\d{2}\.csv$/);
     });
   });
 

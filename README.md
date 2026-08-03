@@ -28,6 +28,8 @@ tests/
     material_management/    Solid-colour material add/edit/delete lifecycle vs /api/material-presets
     analytics/              Org-wide dashboard → Experience Performance drilldown → back, vs /api/new-analytics/dashboard
     branding/               Company logo + name save, then an experience still renders, vs /api/settings
+    login/                  Email-OTP login setup/teardown — writes and deletes .auth/state.json (see "Authentication" below)
+    usage/                  Credits breakdown dimension switches + CSV export, tour Storage/Views tabs, vs /api/credits
   consistency/    Cross-checks between two sources of truth (UI vs API, or API vs API)
     home/         Home dashboard cards vs /api/stats
     experiences/  Experiences filters/sort vs /api/scenes + /api/products
