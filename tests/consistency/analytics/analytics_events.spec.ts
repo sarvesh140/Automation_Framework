@@ -12,9 +12,12 @@ test.describe('Analytics Events Consistency', { tag: ['@consistency', '@regressi
     // alone, fixed to a single aggregate assertion). This timeout is generous headroom
     // for a slower day on the live backend, not a reflection of the typical cost.
     test.setTimeout(120000);
-    eventsResponse = await dashboardApi.getAnalyticsEvents();
-    summaryResponse = await dashboardApi.getAnalyticsSummary();
-    portfolioResponse = await dashboardApi.getAnalyticsPortfolio();
+    // Independent of each other — no need to pay for 3 sequential round trips.
+    [eventsResponse, summaryResponse, portfolioResponse] = await Promise.all([
+      dashboardApi.getAnalyticsEvents(),
+      dashboardApi.getAnalyticsSummary(),
+      dashboardApi.getAnalyticsPortfolio(),
+    ]);
   });
 
   test.describe('Events API schema', () => {

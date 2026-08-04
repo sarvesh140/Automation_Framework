@@ -20,22 +20,38 @@ let summaryNonExistentResponse: any;
 let summaryMalformedResponse: any;
 
 test.beforeAll(async ({ dashboardApi }) => {
+    // Must resolve first — targetExperienceId, used by the target-scoped calls below,
+    // is derived from this response.
     const filtersResponse = await dashboardApi.getAnalyticsFilters();
     const targetExperience = filtersResponse.data.experiences.find(
         (exp: any) => exp.name.trim() === drilldownData.target_experience_name
     );
     targetExperienceId = targetExperience?.id;
 
-    dashboardResponse = await dashboardApi.getAnalyticsDashboard(targetExperienceId);
-    eventsResponse = await dashboardApi.getAnalyticsEvents(targetExperienceId);
-    summaryResponse = await dashboardApi.getAnalyticsSummary(targetExperienceId);
-
-    dashboardNonExistentResponse = await dashboardApi.getAnalyticsDashboard(NON_EXISTENT_EXPERIENCE_ID);
-    dashboardMalformedResponse = await dashboardApi.getAnalyticsDashboard(MALFORMED_EXPERIENCE_ID);
-    eventsNonExistentResponse = await dashboardApi.getAnalyticsEvents(NON_EXISTENT_EXPERIENCE_ID);
-    eventsMalformedResponse = await dashboardApi.getAnalyticsEvents(MALFORMED_EXPERIENCE_ID);
-    summaryNonExistentResponse = await dashboardApi.getAnalyticsSummary(NON_EXISTENT_EXPERIENCE_ID);
-    summaryMalformedResponse = await dashboardApi.getAnalyticsSummary(MALFORMED_EXPERIENCE_ID);
+    // The 8 calls below don't depend on each other — the non-existent/malformed-ID
+    // ones use fixed constants, not targetExperienceId — so there's no reason to
+    // pay for 8 sequential round trips instead of 1.
+    [
+        dashboardResponse,
+        eventsResponse,
+        summaryResponse,
+        dashboardNonExistentResponse,
+        dashboardMalformedResponse,
+        eventsNonExistentResponse,
+        eventsMalformedResponse,
+        summaryNonExistentResponse,
+        summaryMalformedResponse,
+    ] = await Promise.all([
+        dashboardApi.getAnalyticsDashboard(targetExperienceId),
+        dashboardApi.getAnalyticsEvents(targetExperienceId),
+        dashboardApi.getAnalyticsSummary(targetExperienceId),
+        dashboardApi.getAnalyticsDashboard(NON_EXISTENT_EXPERIENCE_ID),
+        dashboardApi.getAnalyticsDashboard(MALFORMED_EXPERIENCE_ID),
+        dashboardApi.getAnalyticsEvents(NON_EXISTENT_EXPERIENCE_ID),
+        dashboardApi.getAnalyticsEvents(MALFORMED_EXPERIENCE_ID),
+        dashboardApi.getAnalyticsSummary(NON_EXISTENT_EXPERIENCE_ID),
+        dashboardApi.getAnalyticsSummary(MALFORMED_EXPERIENCE_ID),
+    ]);
 });
 
 test.describe('Analytics Experience Drilldown API', { tag: ['@api', '@regression'] }, () => {

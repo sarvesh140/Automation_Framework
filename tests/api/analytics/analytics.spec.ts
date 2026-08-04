@@ -5,9 +5,12 @@ let filtersResponse: any;
 let dashboardOrgWideResponse: any;
 
 test.beforeAll(async ({ dashboardApi }) => {
-    portfolioResponse = await dashboardApi.getAnalyticsPortfolio();
-    filtersResponse = await dashboardApi.getAnalyticsFilters();
-    dashboardOrgWideResponse = await dashboardApi.getAnalyticsDashboard();
+    // Independent of each other — no need to pay for 3 sequential round trips.
+    [portfolioResponse, filtersResponse, dashboardOrgWideResponse] = await Promise.all([
+        dashboardApi.getAnalyticsPortfolio(),
+        dashboardApi.getAnalyticsFilters(),
+        dashboardApi.getAnalyticsDashboard(),
+    ]);
 });
 
 test.describe('Analytics Portfolio API', { tag: ['@api', '@regression'] }, () => {

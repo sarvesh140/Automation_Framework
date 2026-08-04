@@ -21,6 +21,7 @@ export class UserManagementPage extends BasePage {
   readonly actionsColumnHeader: Locator;
   readonly selectAllCheckbox: Locator;
   readonly userRowCheckboxes: Locator;
+  readonly roleSelect: Locator;
 
   constructor(page: Page) {
     super(page);
@@ -43,6 +44,8 @@ export class UserManagementPage extends BasePage {
     this.actionsColumnHeader = page.getByRole('columnheader', { name: 'Actions' });
     this.selectAllCheckbox = page.locator('th input[type="checkbox"]');
     this.userRowCheckboxes = page.locator('td input[type="checkbox"]');
+    // The only <select> on this page — the Role dropdown in "Add New User".
+    this.roleSelect = page.locator('select').first();
   }
 
   async open() {
@@ -56,5 +59,35 @@ export class UserManagementPage extends BasePage {
 
   async unselectUserRow(index: number = 0) {
     await this.userRowCheckboxes.nth(index).uncheck();
+  }
+
+  /** The table row for a given user, matched by email text. */
+  userRow(email: string): Locator {
+    return this.page.locator('tr', { hasText: email });
+  }
+
+  /** Per-row "Remove" icon button. */
+  removeUserBtn(email: string): Locator {
+    return this.userRow(email).getByRole('button', { name: 'Remove' });
+  }
+
+  /** Per-row "Edit" icon button. */
+  editUserBtn(email: string): Locator {
+    return this.userRow(email).getByRole('button', { name: 'Edit' });
+  }
+
+  /**
+   * Per-row Login Access toggle. The real checkbox is `sr-only` (visually hidden
+   * for accessibility) — clicking it directly makes Playwright wait forever for
+   * it to become "visible", so this targets the visible <label> wrapping it,
+   * same as a real user's click would.
+   */
+  loginAccessToggle(email: string): Locator {
+    return this.userRow(email).locator('label.relative.inline-flex');
+  }
+
+  /** Per-row "Enabled"/"Disabled" login access badge. */
+  loginAccessStatus(email: string): Locator {
+    return this.userRow(email).locator('[data-testid="user-login-access-status"]');
   }
 }

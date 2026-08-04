@@ -1,62 +1,71 @@
 import { test, expect } from '../../../helpers/api-fixtures';
 
+let statsResponse: any;
+let productsResponse: any[];
+let scenesResponse: any;
+let portfolioResponse: any;
+let filtersResponse: any;
+let tokenResponse: any;
+let settingsResponse: any;
+
+test.beforeAll(async ({ dashboardApi }) => {
+    // Every test below previously re-fetched its own pair of endpoints from scratch
+    // (e.g. getStats()/getAnalyticsPortfolio() independently in 4 different tests) —
+    // none of these 7 calls depends on another's result, so fetch each exactly once
+    // here and let the tests below assert against the shared response.
+    [
+        statsResponse,
+        productsResponse,
+        scenesResponse,
+        portfolioResponse,
+        filtersResponse,
+        tokenResponse,
+        settingsResponse,
+    ] = await Promise.all([
+        dashboardApi.getStats(),
+        dashboardApi.getProducts(),
+        dashboardApi.getScenes(),
+        dashboardApi.getAnalyticsPortfolio(),
+        dashboardApi.getAnalyticsFilters(),
+        dashboardApi.verifyToken(),
+        dashboardApi.getSettings(),
+    ]);
+});
+
 test.describe('API Consistency', { tag: ['@api', '@consistency', '@regression'] }, () => {
-    test('stats_products_matches_active_products_count', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const activeCount = await dashboardApi.getActiveProductsCount();
-        
-        expect(stats.products).toBe(activeCount);
+    test('stats_products_matches_active_products_count', () => {
+        const activeCount = productsResponse.filter((p: any) => p.status !== 'archived').length;
+        expect(statsResponse.products).toBe(activeCount);
     });
 
-    test('stats_experiences_matches_scenes_count', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const scenes = await dashboardApi.getScenes();
-        
-        expect(scenes.scenes.length).toBeGreaterThanOrEqual(stats.experiences);
+    test('stats_experiences_matches_scenes_count', () => {
+        expect(scenesResponse.scenes.length).toBeGreaterThanOrEqual(statsResponse.experiences);
     });
 
-    test('analytics_overview_products_matches_stats_products', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const portfolio = await dashboardApi.getAnalyticsPortfolio();
-        
-        expect(portfolio.data.overview.totalProducts).toBe(stats.products);
+    test('analytics_overview_products_matches_stats_products', () => {
+        expect(portfolioResponse.data.overview.totalProducts).toBe(statsResponse.products);
     });
 
-    test('analytics_overview_experiences_matches_stats_experiences', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const portfolio = await dashboardApi.getAnalyticsPortfolio();
-        
-        expect(portfolio.data.overview.totalExperiences).toBe(stats.experiences);
+    test('analytics_overview_experiences_matches_stats_experiences', () => {
+        expect(portfolioResponse.data.overview.totalExperiences).toBe(statsResponse.experiences);
     });
 
-    test('analytics_overview_users_matches_stats_users', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const portfolio = await dashboardApi.getAnalyticsPortfolio();
-        
-        expect(portfolio.data.overview.totalUsers).toBe(stats.totalUsers);
+    test('analytics_overview_users_matches_stats_users', () => {
+        expect(portfolioResponse.data.overview.totalUsers).toBe(statsResponse.totalUsers);
     });
 
-    test('analytics_overview_sessions_matches_stats_sessions', async ({ dashboardApi }) => {
-        const stats = await dashboardApi.getStats();
-        const portfolio = await dashboardApi.getAnalyticsPortfolio();
-        
-        expect(portfolio.data.overview.totalSessions).toBe(stats.totalSessions);
+    test('analytics_overview_sessions_matches_stats_sessions', () => {
+        expect(portfolioResponse.data.overview.totalSessions).toBe(statsResponse.totalSessions);
     });
 
-    test('analytics_filter_products_match_products_api', async ({ dashboardApi }) => {
-        const products = await dashboardApi.getProducts();
-        const filters = await dashboardApi.getAnalyticsFilters();
-        
-        const productIds = new Set(products.map((p: any) => p.id));
-        for (const fp of filters.data.products) {
+    test('analytics_filter_products_match_products_api', () => {
+        const productIds = new Set(productsResponse.map((p: any) => p.id));
+        for (const fp of filtersResponse.data.products) {
             expect(productIds.has(fp.id)).toBe(true);
         }
     });
 
-    test('settings_tenant_matches_auth_tenant', async ({ dashboardApi }) => {
-        const auth = await dashboardApi.verifyToken();
-        const settings = await dashboardApi.getSettings();
-        
-        expect(settings.tenant).toBe(auth.user.tenant);
+    test('settings_tenant_matches_auth_tenant', () => {
+        expect(settingsResponse.tenant).toBe(tokenResponse.user.tenant);
     });
 });

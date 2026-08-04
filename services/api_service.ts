@@ -99,6 +99,12 @@ export class ApiService {
         });
     }
 
+    async deleteUser(email: string): Promise<any> {
+        return test.step(`API — remove user "${email}"`, async () => {
+            return this._delete(`/api/users/${encodeURIComponent(email)}`);
+        });
+    }
+
     async getAnalyticsPortfolio(): Promise<any> {
         return test.step('API — fetch analytics portfolio', async () => {
             return this._get('/api/new-analytics/portfolio');
