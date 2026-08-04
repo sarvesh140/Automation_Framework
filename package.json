@@ -1,7 +1,16 @@
 {
   "name": "automation-framework",
   "version": "0.1.0",
+  "description": "Playwright + TypeScript test automation for SatoriXR (UI, API, workflow, and consistency suites), reported via Allure Report 3.",
   "private": true,
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sarvesh140/Automation_Framework.git"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "test": "playwright test",
     "test:ui": "playwright test tests/ui",

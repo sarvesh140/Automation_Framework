@@ -1,6 +1,29 @@
 # Automation Framework
 
+[![E2E Test Suite](https://github.com/sarvesh140/Automation_Framework/actions/workflows/e2e-tests.yml/badge.svg)](https://github.com/sarvesh140/Automation_Framework/actions/workflows/e2e-tests.yml)
+
 Playwright + TypeScript test automation for **SatoriXR** (dev environment: `DEV_BASE_URL` in `.env`), reporting through **Allure Report 3**.
+
+## Table of contents
+
+- [Stack](#stack)
+- [Prerequisites](#prerequisites)
+- [Project structure](#project-structure)
+- [Page Object Model](#page-object-model)
+- [Authentication](#authentication)
+- [API service layer](#api-service-layer)
+- [Consistency tests (cross-checking two sources of truth)](#consistency-tests-cross-checking-two-sources-of-truth)
+- [Workflow tests (multi-step user journeys)](#workflow-tests-multi-step-user-journeys)
+- [Data-driven, atomic tests](#data-driven-atomic-tests)
+- [Tags](#tags)
+- [Setup](#setup)
+- [Environment variables (`.env`)](#environment-variables-env)
+- [Running tests](#running-tests)
+- [Reporting (Allure Report 3)](#reporting-allure-report-3)
+- [Parallelization](#parallelization)
+- [CI/CD](#cicd)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Stack
 
@@ -8,6 +31,12 @@ Playwright + TypeScript test automation for **SatoriXR** (dev environment: `DEV_
 - TypeScript, strict mode
 - [Allure Report 3](https://allurereport.org/docs/v3/) (`allure`, `allure-playwright`) — HTML reporting
 - `dotenv` — loads `.env` into `playwright.config.ts`
+
+## Prerequisites
+
+- **Node.js** ≥ 18 (see `engines` in [`package.json`](package.json)) and npm
+- Git
+- Network access to the target `DEV_BASE_URL` environment and to the account credentials (`EMAIL`/`OTP`) used by the `login` project
 
 ## Project structure
 
@@ -21,7 +50,7 @@ tests/
   ui/             Browser-driven tests (Playwright `page` fixture)
     Login/        Unauthenticated
     home/         Authenticated (via helpers/auth-fixtures.ts)
-    Experiences/  Authenticated — 3D viewer interactions (see the 3D viewer gotchas under "Page Object Model" below)
+    Experiences/  Authenticated — 3D viewer interactions (see docs/GOTCHAS.md)
   api/            HTTP-level tests (Playwright `request` fixture, no browser)
   workflow/       End-to-end user journeys spanning multiple UI actions (e.g. upload → verify → delete), cross-checked against the API
     background_management/  HDRI upload/delete lifecycle vs /api/hdri
@@ -54,26 +83,13 @@ await loginPage.open();
 await expect(loginPage.heading).toBeVisible();
 ```
 
-**Gotcha — `waitUntil`:** `BasePage.goto()` uses `waitUntil: 'domcontentloaded'`, not the Playwright default `'load'`. The app never reliably fires the browser `load` event (likely due to persistent polling/websocket connections), so `'load'` causes spurious 30s navigation timeouts even once the page is fully usable.
+A few non-obvious behaviors to know before touching page objects (full rationale in [docs/GOTCHAS.md](docs/GOTCHAS.md#page-object-model)):
 
-**Gotcha — async page data:** Some pages (e.g. the Home dashboard) render their shell instantly but fetch their real content asynchronously afterward — [`pages/home-page.ts`](pages/home-page.ts)'s `open()` explicitly waits for a known-slow element (the "Total Products" card) before returning, so every test built on top of it doesn't have to separately race the same slow API:
-
-```ts
-async open() {
-  await super.goto(origin);
-  await this.overviewCard('Total Products').waitFor({ state: 'visible', timeout: 30000 });
-}
-```
-
-If you add a page object for another async-loading page, follow the same pattern — wait for one concrete, known-slow element in `open()` rather than scattering ad-hoc timeouts across every test.
-
-**Gotcha — don't rely on the app redirecting you.** `LoginPage.open()` navigates straight to `/login` rather than to `DEV_BASE_URL`'s root and trusting the app to redirect. The SPA paints its dashboard shell *first* and only settles on `/login` once the auth check resolves, so a root-then-redirect navigation lets assertions run against that intermediate shell — where every login locator is absent and the URL isn't `/login` yet. This reliably failed whenever the machine was under load and passed when it wasn't, which is the signature of a race rather than a broken locator.
-
-**Gotcha — the 3D viewer exposes no camera API:** [`pages/experience-viewer-page.ts`](pages/experience-viewer-page.ts) drives the WebGL/three.js experience viewer (zoom, rotate) that opens from an experience's "View" button ([`pages/experiences-page.ts`](pages/experiences-page.ts)). Unlike a typical "read `window.camera.position.z`" approach to testing 3D scenes, this app exposes no `window.camera` or any camera-shaped object at all (confirmed by a recursive scan of `window`), and no zoom/rotate UI controls either — interactions are wheel/drag directly on the `<canvas>`. So zoom/rotate can only be verified by capturing the rendered canvas frame before and after the interaction and asserting it changed — either via a raw `Buffer` compare or Playwright's built-in `toHaveScreenshot()` pixel diffing. This is coarser than a real camera-property assertion — it tells you *something* rendered differently, not *what* — and is sensitive to non-deterministic rendering (see the loading-overlay gotcha below).
-
-**Gotcha — "overlay hidden" is not "scene rendered":** the viewer's "Loading experience..." overlay disappearing does not mean the model is ready. The app applies the experience's background *last*, so there's a window where the canvas stably shows an unstyled grey scene — long enough that a screenshot taken then looks legitimately settled (Playwright's own stability check only compares two frames ~100ms apart, which a slow progressive load easily satisfies mid-render). This produced a 422,034-pixel "failure" that was really a mid-load capture. `ExperienceViewerPage.waitForModelToLoad()` therefore waits on the authoritative signal — **the rendered frame itself has stopped changing** (3 consecutive byte-identical canvas screenshots, 500ms apart), which subsumes overlay flicker, late textures, and camera settling in one check. It also soft-waits for the background gradient (a cheap app-specific hint) and takes an explicit `timeoutMs` that callers must keep *below* their test timeout — otherwise the wait is killed mid-flight and surfaces as a confusing unrelated "test timeout" rather than a real diagnosis.
-
-**Gotcha — WebGL output is not bit-exact, so snapshots need a tolerance:** there are **no snapshot tests in the suite any more** — the 3D viewer snapshot spec was removed and archived (with its baseline PNG) under the gitignored `local-archive/experiences-snapshot-test/`, see the README in that folder to restore it. Keep its lesson if you ever add one back: `toHaveScreenshot()` defaults to `maxDiffPixels: 0`, meaning a *single* differing pixel fails. Anti-aliasing on UI edges alone reliably produces 1-2 stray pixels between runs of the same unchanged scene, so those assertions had to pass `{ maxDiffPixels: 100 }` (~0.02% of the frame). An actual zoom moves >400,000 pixels, so the tolerance absorbed render noise without weakening the assertion. If you add snapshot tests over other canvas/WebGL content, budget a similar tolerance rather than assuming pixel-exact reproducibility.
+- `BasePage.goto()` waits for `'domcontentloaded'`, not Playwright's default `'load'` — the app never reliably fires `load`.
+- Async-loading pages (e.g. Home) wait for one known-slow element in `open()` rather than a fixed timeout — see [`pages/home-page.ts`](pages/home-page.ts).
+- `LoginPage.open()` navigates directly to `/login` instead of relying on a redirect from the root, to avoid asserting against the SPA's transient dashboard shell.
+- The 3D viewer ([`pages/experience-viewer-page.ts`](pages/experience-viewer-page.ts)) exposes no camera API, so zoom/rotate is verified via canvas screenshot diffing, and "model loaded" is detected by the rendered frame going byte-stable — not by the loading overlay disappearing.
+- There are no pixel-snapshot tests in the suite currently (archived under gitignored `local-archive/experiences-snapshot-test/`); if you reintroduce one, budget a `maxDiffPixels` tolerance for WebGL's non-bit-exact output.
 
 ## Authentication
 
@@ -140,7 +156,7 @@ test('category_filter_matches_linked_products_in_api', async ({ page, dashboardA
 });
 ```
 
-**Gotcha — the card title is `scene.name`, not `scene.displayTitle`:** these two fields can differ (one real scene is named `"Excavator (Do not Edit)"` but has `displayTitle: "Earth Mover"`). Building the expected list off the wrong field produces a mismatch that looks like a UI bug but is actually a test bug — verify which field a card actually renders (e.g. via a quick `page.evaluate` dump) before writing the comparison, rather than assuming the "nicer-sounding" field is the one displayed.
+Note: the rendered card title is `scene.name`, not `scene.displayTitle` — the two fields can differ, so verify which one the UI actually renders before writing an expected-value comparison (details in [docs/GOTCHAS.md](docs/GOTCHAS.md#consistency-tests)).
 
 ## Workflow tests (multi-step user journeys)
 
@@ -150,15 +166,13 @@ Each workflow spec also cross-verifies its result against the matching `/api/*` 
 
 Because these tests mutate shared, persistent server state (not local fixtures), each spec's `test.afterEach` re-fetches the resource and deletes any leftover created during the test — a safety net for when an assertion mid-flow fails and the normal delete step never runs, so a broken run doesn't permanently pollute the shared environment other tests/users see.
 
-**Gotcha — "Delete" isn't a single click.** The HDRI Manager's delete icon (`aria-label="Delete HDRI"`) doesn't delete on click — it opens a confirm modal ("Delete HDRI — Are you sure you want to delete "X"? This action cannot be undone.") with its own **Delete**/Cancel buttons, and the `DELETE /api/hdri/:id` request only fires once that modal's **Delete** button is clicked. This was confirmed by watching network traffic during a manual run — clicking only the row icon fires no request at all. If you add delete flows for other resources, check for the same confirm-modal pattern rather than assuming the row action deletes directly.
+A few non-obvious behaviors to know before touching workflow specs (full rationale in [docs/GOTCHAS.md](docs/GOTCHAS.md#workflow-tests)):
 
-**Gotcha — "Remove logo" is a separate request from "Save Settings", and the two race.** The branding form looks like one form with one Save button, but the **Remove** button opens a native `confirm()` and then fires its own `DELETE /api/settings/logo` immediately; only the name/colour travel in the Save `PUT /api/settings`. `BrandingPage.removeLogo()` originally returned as soon as the click landed, leaving that DELETE in flight — the Save PUT issued right after would race it and write the *old* logo path back, so an assertion immediately after Save read the stale logo while the DELETE applied a moment later and flipped it to `null`. That reads exactly like a flaky assertion and is actually a request-ordering bug in the test. `removeLogo()` now waits for the DELETE response (and for the preview to disappear) before returning. When you add page-object methods for other controls, check whether the button owns a request of its own rather than assuming it only mutates form state.
-
-**Gotcha — don't bake "the original value" into a fixture.** `tests/workflow/branding/logo_propagation.spec.ts` overwrites tenant-wide branding, so its cleanup has to put the previous values back. That cleanup originally restored `original_company_name`/`original_company_logo` read out of `fixtures/branding_workflow.json` — hardcoded `""`/`null` that were a guess, not a reading. The cleanup therefore didn't restore the tenant, it *overwrote* it with the guess, and because `tests/api/settings` asserts `typeof settings.companyLogo === 'string'`, a nulled logo broke a completely different suite. Capture the pre-test values live in `beforeAll` via `dashboardApi.getSettings()` and restore those instead. Note the restore can't assert the logo path is byte-identical — re-uploading the image mints a fresh `/logos/<timestamp>-<hash>` path — so assert that *a* logo is set again, not *which*.
-
-**Gotcha — the catalog grid paginates, so search before you click a card.** The same branding spec drives "does an experience still render after a branding change" by clicking a card's **View** button. `ExperiencePage.open()` waits for the first card and returns, but the grid shows only `page_size` (12) cards at a time in newest-first order — and the target experience (`fixtures/experiences.json`'s `search.expected_title`, currently "Drone Experience") can easily sit dozens of cards deep. Its View button is genuinely absent from the DOM, so the click burned the full test timeout waiting for an element that was never going to appear. Any test that acts on a *specific* card must narrow the grid first (`experiencePage.search(...)`) rather than assuming `open()` renders the whole catalog. Related: catalog item names have occasionally carried a **trailing space** server-side, so match with substring matchers (`filter({ hasText })`, `toContainText`) or `.trim()` the API value rather than exact-equality — an exact comparison against the fixture's title can silently find nothing if the server-side name isn't byte-identical.
-
-**Gotcha — capture video for every run, not just failures.** The global `use.video` in `playwright.config.ts` is `'retain-on-failure'`, so a passing run normally discards its video. Workflow specs set `test.use({ video: 'on' })` at the top of the file (must be module-level, not inside `test.describe` — Playwright rejects a per-describe `video` override because it would require a new worker) so the recording is kept and attached to the Allure/Playwright report regardless of outcome — useful for these longer, stateful journeys where you want to see the actual run even when it passes.
+- Delete actions typically require confirming a modal — the row icon alone doesn't fire the `DELETE` request; check for this pattern before assuming a control acts directly.
+- Some form controls (e.g. "Remove logo") fire their own request independently of the form's main Save button — page-object methods for such controls must await their own request/response, not just the click.
+- Workflow cleanup restores pre-test state captured live via the API in `beforeAll`, never hardcoded fixture defaults, so a broken run can't overwrite real tenant data with a guess.
+- Catalog/list grids paginate — tests targeting a specific card must search/filter first rather than assuming `open()` renders the whole catalog.
+- Workflow specs set `test.use({ video: 'on' })` at module level so recordings are kept for passing runs too, not just failures.
 
 ## Data-driven, atomic tests
 
@@ -267,12 +281,40 @@ On failure, a screenshot and video of the page are captured automatically (`use.
 
 `fullyParallel: true` runs every test concurrently (not just separate files) up to the configured `workers` count — `4` locally, `2` in CI (`process.env.CI`). Override per-run with `--workers=N`, e.g. `npx playwright test --workers=1` to debug flaky tests in isolation.
 
-**Raising `workers` doesn't reliably speed this suite up.** We tried computing `workers` from CPU count (`os.cpus().length`, 12 on the dev machine) and it made no measurable difference — sometimes slightly faster, sometimes slower, and once introduced a new failure under load. The bottleneck for the authenticated UI tests isn't local CPU; it's the live app's backend serving dashboard data to several concurrent authenticated sessions at once. More workers just means more sessions contending for the same slow endpoint. If you want to genuinely speed up the suite, the actual lever is reducing how many fresh page loads happen in the first place (e.g. reusing one authenticated context across several tests in a file) — that's a real trade-off against per-test isolation, not yet done here.
-
-Each Playwright worker launches its own browser **once** and reuses it for every test it runs — only the `context`/`page` are recreated per test (Playwright's default; confirmed by inspecting `browser` fixture identity across sequential tests in this project). So the per-test cost you see (~5-15s per Home test) is from context creation + navigation + waiting on the live app's data, not from repeatedly launching browsers.
-
-**Wall-clock timings here are noise-dominated — don't tune against them.** Four identical full-suite runs came in at 75s, 78s, 94s and 122s, with `ui/Experiences` alone swinging 32s→50s and `consistency/home` 26s→54s between runs. A single before/after comparison of total runtime tells you nothing, because the spread between identical runs is larger than most optimisations. If you do attempt optimisation work, measure something that isn't drowned in that variance — run `--reporter=json` and analyse per-test `startTime`/`duration`/`workerIndex` for idle gaps, worker restarts (distinct `workerIndex` exceeding the configured worker count proves a restart), and duplicated `beforeAll` work — and expect to have to justify the change on structure rather than on a stopwatch.
-
-**Don't reach for a shared browser context to speed up UI tests.** It's the obvious idea — load the dashboard once per worker instead of once per test — but Playwright's automatic artifacts (`screenshot: 'only-on-failure'`, `video: 'retain-on-failure'`, `trace`) are all wired into the built-in **test-scoped** `context`/`page` fixtures. A worker-scoped context created from the `browser` fixture bypasses that machinery: video is recorded per BrowserContext, so you would get one unattributable file spanning every test that worker ran, and failure screenshots and traces would not be collected at all. Debugging the 3D snapshot test depended entirely on those artifacts, so that is a bad trade.
+Each worker launches its own browser once and reuses it across its tests (only `context`/`page` are recreated per test), so per-test cost mainly reflects navigation and the live app's response time, not browser startup. Raising `workers` further hasn't reliably improved wall-clock time — the bottleneck is the live app's backend, not local CPU — and a shared worker-scoped browser context was deliberately avoided because it would break Playwright's automatic per-test screenshot/video/trace capture. See [docs/GOTCHAS.md](docs/GOTCHAS.md#parallelization) for the measurements behind these conclusions before attempting performance changes here.
 
 Report/result output (`allure-results/`, `allure-report/`, `playwright-report/`, `test-results/`) is gitignored — regenerate it locally or in CI as needed.
+
+## CI/CD
+
+[`.github/workflows/e2e-tests.yml`](.github/workflows/e2e-tests.yml) runs the suite on GitHub Actions (`ubuntu-latest`, Chromium only, 60-minute timeout).
+
+- **Trigger:** manual only (`workflow_dispatch`) — there is no on-push/on-PR trigger. Run it from the repo's **Actions** tab, choosing which suite to execute:
+
+  | Input value | Runs |
+  |-------------|------|
+  | `all` *(default)* | `npx playwright test` — the full suite |
+  | `api` | `tests/api` |
+  | `ui` | `tests/ui` |
+  | `workflow` | `tests/workflow` |
+
+  Note: `tests/consistency` has no dedicated option yet (matches the "no dedicated npm script" gap noted under [Running tests](#running-tests)) — pick `all` to include it.
+
+- **Required repository secrets** (Settings → Secrets and variables → Actions): `DEV_BASE_URL`, `EMAIL`, `OTP` — mirror the [environment variables](#environment-variables-env) `.env` normally provides. `HEADED` is hardcoded to `'false'` in the workflow.
+- **Steps:** checkout → `actions/setup-node@v4` (Node 20, npm cache) → `npm ci` → `npx playwright install --with-deps chromium` → run the selected suite.
+- **Artifacts:** on every run (pass or fail), `allure-results/` and `test-results/`/`playwright-report/` are uploaded as `allure-results-<suite>` / `playwright-report-<suite>`, retained 14 days — download them from the run's summary page to inspect failures without re-running locally.
+
+Before the workflow can succeed, the three secrets above must be configured on the GitHub repository; without them the `login` project fails immediately and every downstream test is skipped.
+
+## Contributing
+
+- Match new tests to the existing layout: `tests/ui` for pure browser checks, `tests/api` for pure HTTP checks, `tests/workflow` for multi-step journeys that mutate server state, `tests/consistency` for cross-checks between two sources of truth (see the sections above for how to choose).
+- Reuse the Page Object Model (extend [`pages/base-page.ts`](pages/base-page.ts)) and the API service layer ([`services/api_service.ts`](services/api_service.ts)) instead of driving locators or `request.get(...)` directly from a spec.
+- Tag every new `test`/`describe` per the [Tags](#tags) table so it's filterable via `--grep` and shows up correctly in Allure.
+- Read [docs/GOTCHAS.md](docs/GOTCHAS.md) before touching the 3D viewer, HDRI/branding workflow specs, or auth — it documents real, previously-hit races and bugs, not hypothetical edge cases.
+- Keep `.env`, `.auth/`, and other gitignored paths out of commits; never hardcode `EMAIL`/`OTP`/`DEV_BASE_URL` into source.
+- Run the relevant suite locally (`npm test` / `npm run test:ui` / `npm run test:api`) before opening a PR.
+
+## License
+
+`UNLICENSED` (see [`package.json`](package.json)) — private, internal SatoriXR project. Not published or licensed for external use.
